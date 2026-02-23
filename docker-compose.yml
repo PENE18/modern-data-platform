@@ -1,0 +1,746 @@
+# version: '3.8'
+
+# services:
+#   # ==========================================
+#   # STORAGE LAYER
+#   # ==========================================
+  
+#   # MinIO - S3-compatible object storage
+#   minio:
+#     image: minio/minio:latest
+#     container_name: minio
+#     ports:
+#       - "9000:9000"
+#       - "9001:9001"
+#     environment:
+#       MINIO_ROOT_USER: minioadmin
+#       MINIO_ROOT_PASSWORD: minioadmin123
+#     command: server /data --console-address ":9001"
+#     volumes:
+#       - minio-data:/data
+#     networks:
+#       - data-platform
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+#       interval: 30s
+#       timeout: 20s
+#       retries: 3
+
+#   # Create MinIO buckets on startup
+#   minio-setup:
+#     image: minio/mc:latest
+#     depends_on:
+#       - minio
+#     networks:
+#       - data-platform
+#     entrypoint: >
+#       /bin/sh -c "
+#       sleep 10;
+#       /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+#       /usr/bin/mc mb myminio/lakehouse --ignore-existing;
+#       /usr/bin/mc mb myminio/warehouse --ignore-existing;
+#       /usr/bin/mc mb myminio/raw-data --ignore-existing;
+#       echo 'Buckets created successfully';
+#       "
+
+#   # PostgreSQL - Metadata catalog
+#   postgres:
+#     image: postgres:15
+#     container_name: postgres
+#     ports:
+#       - "5432:5432"
+#     environment:
+#       POSTGRES_USER: admin
+#       POSTGRES_PASSWORD: admin123
+#       POSTGRES_DB: metastore
+#     volumes:
+#       - postgres-data:/var/lib/postgresql/data
+#       - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+#     networks:
+#       - data-platform
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U admin -d metastore"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+
+#   # ==========================================
+#   # PROCESSING LAYER
+#   # ==========================================
+
+#   # Spark Master
+#   spark-master:
+#     image: bitnami/spark:3.5
+#     container_name: spark-master
+#     ports:
+#       - "8080:8080"  # Spark Web UI
+#       - "7077:7077"  # Spark Master
+#       - "4040:4040"  # Spark Application UI
+#     environment:
+#       - SPARK_MODE=master
+#       - SPARK_RPC_AUTHENTICATION_ENABLED=no
+#       - SPARK_RPC_ENCRYPTION_ENABLED=no
+#       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+#       - SPARK_SSL_ENABLED=no
+#       - SPARK_USER=spark
+#     volumes:
+#       - ./spark/jobs:/opt/spark-jobs
+#       - ./spark/notebooks:/opt/notebooks
+#       - ./data:/opt/data
+#       - ./config:/opt/config
+#     networks:
+#       - data-platform
+
+#   # Spark Worker 1
+#   spark-worker-1:
+#     image: bitnami/spark:3.5
+#     container_name: spark-worker-1
+#     depends_on:
+#       - spark-master
+#     environment:
+#       - SPARK_MODE=worker
+#       - SPARK_MASTER_URL=spark://spark-master:7077
+#       - SPARK_WORKER_MEMORY=2G
+#       - SPARK_WORKER_CORES=2
+#       - SPARK_RPC_AUTHENTICATION_ENABLED=no
+#       - SPARK_RPC_ENCRYPTION_ENABLED=no
+#       - SPARK_USER=spark
+#     volumes:
+#       - ./spark/jobs:/opt/spark-jobs
+#       - ./data:/opt/data
+#       - ./config:/opt/config
+#     networks:
+#       - data-platform
+
+#   # Spark Worker 2
+#   spark-worker-2:
+#     image: bitnami/spark:3.5
+#     container_name: spark-worker-2
+#     depends_on:
+#       - spark-master
+#     environment:
+#       - SPARK_MODE=worker
+#       - SPARK_MASTER_URL=spark://spark-master:7077
+#       - SPARK_WORKER_MEMORY=2G
+#       - SPARK_WORKER_CORES=2
+#       - SPARK_RPC_AUTHENTICATION_ENABLED=no
+#       - SPARK_RPC_ENCRYPTION_ENABLED=no
+#       - SPARK_USER=spark
+#     volumes:
+#       - ./spark/jobs:/opt/spark-jobs
+#       - ./data:/opt/data
+#       - ./config:/opt/config
+#     networks:
+#       - data-platform
+
+#   # ==========================================
+#   # QUERY LAYER
+#   # ==========================================
+
+#   # Dremio - Query engine
+#   dremio:
+#     image: dremio/dremio-oss:latest
+#     container_name: dremio
+#     ports:
+#       - "9047:9047"   # Web UI
+#       - "31010:31010" # ODBC/JDBC
+#       - "45678:45678" # Arrow Flight
+#     environment:
+#       DREMIO_JAVA_SERVER_EXTRA_OPTS: "-Xmx4g -XX:MaxDirectMemorySize=4g"
+#     volumes:
+#       - dremio-data:/opt/dremio/data
+#     depends_on:
+#       - minio
+#       - postgres
+#     networks:
+#       - data-platform
+
+#   # ==========================================
+#   # ORCHESTRATION LAYER
+#   # ==========================================
+
+#   # Airflow Database Init
+#   airflow-init:
+#     image: apache/airflow:2.8.0-python3.11
+#     container_name: airflow-init
+#     depends_on:
+#       - postgres
+#     environment:
+#       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+#       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+#       AIRFLOW__CORE__FERNET_KEY: '81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs='
+#       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+#       AIRFLOW__WEBSERVER__SECRET_KEY: 'a_very_secret_key'
+#       _PIP_ADDITIONAL_REQUIREMENTS: |
+#         apache-airflow-providers-apache-spark==4.7.1
+#         apache-airflow-providers-postgres==5.10.0
+#         pyiceberg[s3fs,pyarrow]==0.6.0
+#         pandas==2.2.0
+#         faker==22.6.0
+#     volumes:
+#       - ./airflow/dags:/opt/airflow/dags
+#       - ./airflow/plugins:/opt/airflow/plugins
+#       - ./data:/opt/data
+#       - airflow-logs:/opt/airflow/logs
+#     networks:
+#       - data-platform
+#     entrypoint: /bin/bash
+#     command:
+#       - -c
+#       - |
+#         airflow db init
+#         airflow users create \
+#           --username admin \
+#           --password admin \
+#           --firstname Admin \
+#           --lastname User \
+#           --role Admin \
+#           --email admin@example.com || true
+
+#   # Airflow Webserver
+#   airflow-webserver:
+#     image: apache/airflow:2.8.0-python3.11
+#     container_name: airflow-webserver
+#     depends_on:
+#       - airflow-init
+#     ports:
+#       - "8081:8080"
+#     environment:
+#       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+#       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+#       AIRFLOW__CORE__FERNET_KEY: '81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs='
+#       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+#       AIRFLOW__WEBSERVER__SECRET_KEY: 'a_very_secret_key'
+#       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+#       _PIP_ADDITIONAL_REQUIREMENTS: |
+#         apache-airflow-providers-apache-spark==4.7.1
+#         apache-airflow-providers-postgres==5.10.0
+#         pyiceberg[s3fs,pyarrow]==0.6.0
+#         pandas==2.2.0
+#         faker==22.6.0
+#     volumes:
+#       - ./airflow/dags:/opt/airflow/dags
+#       - ./airflow/plugins:/opt/airflow/plugins
+#       - ./data:/opt/data
+#       - airflow-logs:/opt/airflow/logs
+#     networks:
+#       - data-platform
+#     command: webserver
+
+#   # Airflow Scheduler
+#   airflow-scheduler:
+#     image: apache/airflow:2.8.0-python3.11
+#     container_name: airflow-scheduler
+#     depends_on:
+#       - airflow-init
+#     environment:
+#       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+#       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+#       AIRFLOW__CORE__FERNET_KEY: '81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs='
+#       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+#       _PIP_ADDITIONAL_REQUIREMENTS: |
+#         apache-airflow-providers-apache-spark==4.7.1
+#         apache-airflow-providers-postgres==5.10.0
+#         pyiceberg[s3fs,pyarrow]==0.6.0
+#         pandas==2.2.0
+#         faker==22.6.0
+#     volumes:
+#       - ./airflow/dags:/opt/airflow/dags
+#       - ./airflow/plugins:/opt/airflow/plugins
+#       - ./data:/opt/data
+#       - airflow-logs:/opt/airflow/logs
+#     networks:
+#       - data-platform
+#     command: scheduler
+
+#   # ==========================================
+#   # NOTEBOOK LAYER
+#   # ==========================================
+
+#   # Jupyter with PySpark
+#   jupyter:
+#     image: jupyter/pyspark-notebook:latest
+#     container_name: jupyter
+#     ports:
+#       - "8888:8888"
+#     environment:
+#       JUPYTER_ENABLE_LAB: "yes"
+#       GRANT_SUDO: "yes"
+#     volumes:
+#       - ./spark/notebooks:/home/jovyan/work
+#       - ./data:/home/jovyan/data
+#       - ./config:/home/jovyan/config
+#     depends_on:
+#       - spark-master
+#     networks:
+#       - data-platform
+
+#   # ==========================================
+#   # MONITORING LAYER
+#   # ==========================================
+
+#   # Prometheus
+#   prometheus:
+#     image: prom/prometheus:latest
+#     container_name: prometheus
+#     ports:
+#       - "9090:9090"
+#     volumes:
+#       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+#       - prometheus-data:/prometheus
+#     command:
+#       - '--config.file=/etc/prometheus/prometheus.yml'
+#       - '--storage.tsdb.path=/prometheus'
+#     networks:
+#       - data-platform
+
+#   # Grafana
+#   grafana:
+#     image: grafana/grafana:latest
+#     container_name: grafana
+#     ports:
+#       - "3000:3000"
+#     environment:
+#       GF_SECURITY_ADMIN_USER: admin
+#       GF_SECURITY_ADMIN_PASSWORD: admin
+#       GF_INSTALL_PLUGINS: grafana-piechart-panel
+#     volumes:
+#       - grafana-data:/var/lib/grafana
+#       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+#       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+#     depends_on:
+#       - prometheus
+#     networks:
+#       - data-platform
+
+# volumes:
+#   minio-data:
+#   postgres-data:
+#   dremio-data:
+#   airflow-logs:
+#   prometheus-data:
+#   grafana-data:
+
+# networks:
+#   data-platform:
+#     driver: bridge
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # STORAGE LAYER
+  # ==========================================
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - data-platform
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - data-platform
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin123; do sleep 2; done;
+      /usr/bin/mc mb myminio/lakehouse --ignore-existing;
+      /usr/bin/mc mb myminio/warehouse --ignore-existing;
+      /usr/bin/mc mb myminio/raw-data --ignore-existing;
+      echo 'Buckets created successfully';
+      "
+
+  # ==========================================
+  # METASTORE / DATABASE
+  # ==========================================
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - data-platform
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # PROCESSING LAYER
+  # ==========================================
+
+  spark-master:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    image: modern-data-platform-spark:latest
+    container_name: spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+      - "4040-4050:4040-4050"
+    environment:
+      - SPARK_MODE=master
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+    volumes:
+      - ./spark/jobs:/opt/spark-jobs
+      - ./spark/notebooks:/opt/notebooks
+      - ./data:/opt/data
+      - ./config:/opt/config
+    command: >
+      /bin/bash -c "
+      mkdir -p /opt/spark/logs &&
+      /opt/spark/sbin/start-master.sh &&
+      tail -f /opt/spark/logs/*.out
+      "
+    networks:
+      - data-platform
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  spark-worker-1:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    image: modern-data-platform-spark:latest
+    container_name: spark-worker-1
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_WEBUI_PORT=8081
+    volumes:
+      - ./spark/jobs:/opt/spark-jobs
+      - ./data:/opt/data
+      - ./config:/opt/config
+    command: >
+      /bin/bash -c "
+      mkdir -p /opt/spark/logs &&
+      /opt/spark/sbin/start-worker.sh spark://spark-master:7077 --memory 2G --cores 2 &&
+      tail -f /opt/spark/logs/*.out
+      "
+    networks:
+      - data-platform
+
+  spark-worker-2:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    image: modern-data-platform-spark:latest
+    container_name: spark-worker-2
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_WEBUI_PORT=8082
+    volumes:
+      - ./spark/jobs:/opt/spark-jobs
+      - ./data:/opt/data
+      - ./config:/opt/config
+    command: >
+      /bin/bash -c "
+      mkdir -p /opt/spark/logs &&
+      /opt/spark/sbin/start-worker.sh spark://spark-master:7077 --memory 2G --cores 2 &&
+      tail -f /opt/spark/logs/*.out
+      "
+    networks:
+      - data-platform
+
+  # ==========================================
+  # ICEBERG + CATALOG LAYER
+  # ==========================================
+
+  # nessie:
+  #   image: ghcr.io/projectnessie/nessie:0.77.1
+  #   container_name: nessie
+  #   ports:
+  #     - "19120:19120"
+  #   environment:
+  #     QUARKUS_HTTP_PORT: 19120
+  #     NESSIE_VERSION_STORE_TYPE: ROCKSDB
+  #   volumes:
+  #     - nessie-data:/nessie/data
+  #   networks:
+  #     - data-platform
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:19120/api/v1/config"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  nessie:
+     image: ghcr.io/projectnessie/nessie:0.90.4
+     container_name: nessie
+     ports:
+      - "19120:19120"
+     environment:
+      QUARKUS_HTTP_PORT: 19120
+      NESSIE_VERSION_STORE_TYPE: ROCKSDB
+     volumes:
+      - nessie-data:/nessie/data
+     networks:
+     - data-platform
+     healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+
+  # ==========================================
+  # QUERY LAYER
+  # ==========================================
+
+  dremio:
+    image: dremio/dremio-oss:latest
+    container_name: dremio
+    ports:
+      - "9047:9047"
+      - "31010:31010"
+      - "45678:45678"
+    environment:
+      DREMIO_JAVA_SERVER_EXTRA_OPTS: "-Xmx6g -XX:MaxDirectMemorySize=6g"
+    volumes:
+      - dremio-data:/opt/dremio/data
+    depends_on:
+      - minio
+      - postgres
+      - nessie
+    networks:
+      - data-platform
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9047"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ==========================================
+  # ORCHESTRATION LAYER
+  # ==========================================
+
+  airflow-init:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: '81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'a_very_secret_key'
+      _PIP_ADDITIONAL_REQUIREMENTS: >-
+        apache-airflow-providers-apache-spark==4.1.3
+        apache-airflow-providers-postgres==5.10.0
+        pyiceberg[s3fs,pyarrow]==0.6.0
+        pandas==2.2.0
+        faker==22.6.0
+        pyspark==3.5.1
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./data:/opt/data
+      - airflow-logs:/opt/airflow/logs
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true
+    networks:
+      - data-platform
+
+  airflow-webserver:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-webserver
+    depends_on:
+      - airflow-init
+    ports:
+      - "8081:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+      AIRFLOW__WEBSERVER__WORKERS: 1
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: 300
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: 300
+      _PIP_ADDITIONAL_REQUIREMENTS: >-
+        apache-airflow-providers-apache-spark==4.1.3
+        apache-airflow-providers-postgres==5.10.0
+        pyiceberg[s3fs,pyarrow]==0.6.0
+        pandas==2.2.0
+        faker==22.6.0
+        pyspark==3.5.1
+    volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./data:/opt/data
+    - ./scripts:/opt/scripts   # <-- monte le dossier scripts local
+    - airflow-logs:/opt/airflow/logs
+    command: webserver
+    networks:
+      - data-platform
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-scheduler
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: '81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      _PIP_ADDITIONAL_REQUIREMENTS: >-
+        apache-airflow-providers-apache-spark==4.1.3
+        apache-airflow-providers-postgres==5.10.0
+        pyiceberg[s3fs,pyarrow]==0.6.0
+        pandas==2.2.0
+        faker==22.6.0
+        pyspark==3.5.1
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./data:/opt/data
+      - airflow-logs:/opt/airflow/logs
+    command: scheduler
+    networks:
+      - data-platform
+
+  # ==========================================
+  # NOTEBOOK LAYER
+  # ==========================================
+
+  jupyter:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      GRANT_SUDO: "yes"
+      SPARK_MASTER: "spark://spark-master:7077"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      AWS_ENDPOINT_URL: http://minio:9000
+    volumes:
+      - ./spark/notebooks:/home/jovyan/work
+      - ./data:/home/jovyan/data
+      - ./config:/home/jovyan/config
+      - ./spark/spark-defaults.conf:/usr/local/spark/conf/spark-defaults.conf
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    networks:
+      - data-platform
+
+  # ==========================================
+  # MONITORING LAYER
+  # ==========================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - data-platform
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - data-platform
+
+# ==========================================
+# VOLUMES
+# ==========================================
+volumes:
+  minio-data:
+  postgres-data:
+  dremio-data:
+  nessie-data:
+  airflow-logs:
+  prometheus-data:
+  grafana-data:
+
+# ==========================================
+# NETWORKS
+# ==========================================
+networks:
+  data-platform:
+    driver: bridge
