@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'modern-data-platform'
+    environment: 'development'
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Spark Master
+  - job_name: 'spark-master'
+    static_configs:
+      - targets: ['spark-master:8080']
+        labels:
+          service: 'spark'
+          role: 'master'
+    metrics_path: /metrics/prometheus/
+    
+  # Airflow
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+        labels:
+          service: 'airflow'
+    metrics_path: /admin/metrics/
