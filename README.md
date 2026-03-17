@@ -259,6 +259,7 @@ df.orderBy("order_date", ascending=False).show(10)
 ### Prometheus — Collecte des Métriques
 
 Ouvrir http://localhost:9090. Vérifier les cibles de collecte sur `/targets` — toutes doivent être vertes.
+![Description of image](screen/prometheus.png)
 
 Requêtes PromQL utiles :
 
