@@ -218,6 +218,8 @@ Secret Key :       minioadmin123
 Propriétés de connexion (identiques à MinIO ci-dessus)
 ```
 
+![Description of image](screen/dremio.png)
+
 **Vérification :**
 
 ```sql
