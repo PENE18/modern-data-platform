@@ -30,6 +30,7 @@ class IcebergOperations:
             .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog") \
             .config("spark.sql.catalog.iceberg.catalog-impl", "org.apache.iceberg.nessie.NessieCatalog") \
             .config("spark.sql.catalog.iceberg.uri", "http://nessie:19120/api/v2") \
+            .config("spark.sql.catalog.iceberg.uri", "http://nessie:19120/api/v2")
             .config("spark.sql.catalog.iceberg.ref", "main") \
             .config("spark.sql.catalog.iceberg.authentication.type", "NONE") \
             .config("spark.sql.catalog.iceberg.warehouse", "s3a://warehouse/") \
