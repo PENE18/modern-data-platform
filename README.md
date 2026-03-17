@@ -289,6 +289,8 @@ Ouvrir http://localhost:3000 (`admin` / `admin`).
 **Ajouter Prometheus comme source de données :**
 Connexions → Sources de données → Prometheus → URL : `http://prometheus:9090` → Sauvegarder & Tester
 
+![Description of image](screen/grafana.png)
+
 **Panneaux recommandés pour le tableau de bord :**
 
 | Panneau | Requête | Visualisation |
