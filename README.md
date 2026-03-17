@@ -123,7 +123,7 @@ ls -lh data/gold/
 # customer_metrics.parquet   daily_sales.parquet
 # product_performance.parquet   regional_sales.parquet   kpi_report.json
 ```
-![Description of image](screen/architecture.png)
+![Description of image](screen/airflow.png)
 Il est aussi possible de générer les données sans Airflow :
 
 ```bash
