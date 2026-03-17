@@ -220,37 +220,7 @@ Propriétés de connexion (identiques à MinIO ci-dessus)
 
 ![Description of image](screen/dremio.png)
 
-**Vérification :**
 
-```sql
-SHOW SCHEMAS IN nessie;
--- nessie.bronze   nessie.silver   nessie.gold
-
-SELECT * FROM nessie.bronze.orders LIMIT 10;
-```
-
-**Exemples de requêtes métier :**
-
-```sql
--- Tendance de revenus quotidienne
-SELECT date, num_orders, total_revenue, avg_order_value
-FROM nessie.gold.daily_sales
-ORDER BY date DESC LIMIT 14;
-
--- Top 10 clients par valeur vie client
-SELECT customer_id, total_orders, lifetime_value
-FROM nessie.gold.customer_metrics
-ORDER BY lifetime_value DESC LIMIT 10;
-
--- Revenus par catégorie de produits
-SELECT category, SUM(total_revenue) AS revenu, SUM(units_sold) AS unites
-FROM nessie.gold.product_performance
-GROUP BY category ORDER BY revenu DESC;
-
--- Voyage dans le temps Iceberg
-SELECT COUNT(*) FROM nessie.bronze.orders
-VERSION AS OF <snapshot_id>;
-```
 
 Dremio expose également **Arrow Flight** (`:45678`) et **ODBC/JDBC** (`:31010`) pour les outils de BI.
 
