@@ -235,6 +235,8 @@ docker logs jupyter | grep "token="
 
 Ouvrir http://localhost:8888 puis créer un nouveau notebook.
 
+![Description of image](screen/jupyter.png)
+
 **Connexion à Spark et lecture Iceberg :**
 
 ```python
@@ -249,52 +251,6 @@ df = spark.read.format("iceberg").load("iceberg.gold.daily_sales")
 df.orderBy("order_date", ascending=False).show(10)
 ```
 
-**Voyage dans le temps :**
-
-```python
-spark.sql("""
-    SELECT COUNT(*) AS enregistrements
-    FROM iceberg.bronze.orders
-    VERSION AS OF 1234567890
-""").show()
-```
-
-**Évolution de schéma — sans interruption de service :**
-
-```python
-spark.sql("""
-    ALTER TABLE iceberg.bronze.orders
-    ADD COLUMN remise_percent DOUBLE
-""")
-
-# Les anciennes requêtes continuent de fonctionner à l'identique
-spark.sql("SELECT order_id, total_amount FROM iceberg.bronze.orders LIMIT 5").show()
-```
-
-**Test de performance — élagage de partitions :**
-
-```python
-# Scan complet
-spark.sql("SELECT COUNT(*) FROM iceberg.bronze.orders").show()
-
-# Avec filtre de partition — ne lit que les fichiers concernés (~100x plus rapide)
-spark.sql("""
-    SELECT COUNT(*) FROM iceberg.bronze.orders
-    WHERE order_date = '2024-02-15'
-""").show()
-```
-
-**Lecture directe des Parquet Gold avec pandas :**
-
-```python
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = pd.read_parquet('/home/jovyan/data/gold/daily_sales.parquet')
-df.sort_values('date').plot(x='date', y='total_revenue', figsize=(14, 5), title='Revenus Quotidiens')
-plt.tight_layout()
-plt.show()
-```
 
 ---
 
