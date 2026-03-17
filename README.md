@@ -297,8 +297,6 @@ Connexions → Sources de données → Prometheus → URL : `http://prometheus:9
 |---|---|---|
 | Utilisation CPU | `rate(process_cpu_seconds_total[5m])` | Série temporelle |
 | Mémoire (Mo) | `process_resident_memory_bytes / 1024 / 1024` | Jauge |
-| Workers Spark | `spark_master_aliveWorkers` | Stat |
-| Tâches Airflow | `airflow_task_instance_created_count` | Stat |
 
 **Importer un tableau de bord JVM prêt à l'emploi :** Tableaux de bord → Importer → ID `4701` → sélectionner Prometheus → Importer
 
